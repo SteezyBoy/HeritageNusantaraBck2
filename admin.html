@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="id" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Admin - Heritage Nusantara</title>
+<link rel="stylesheet" href="assets/css/shared/variables.css">
+<link rel="stylesheet" href="assets/css/admin/layout.css">
+<link rel="stylesheet" href="assets/css/admin/orders.css">
+<link rel="stylesheet" href="assets/css/admin/forms.css">
+</head>
+<body>
+
+<!-- ===== LOGIN ===== -->
+<div class="login-wrap" id="loginWrap">
+    <div class="login-box">
+        <div class="login-logo">🍃</div>
+        <h1>Heritage Nusantara</h1>
+        <p>Admin Panel — Masuk untuk melanjutkan</p>
+        <input type="text"     id="loginUser" placeholder="Username" autocomplete="off">
+        <input type="password" id="loginPass" placeholder="Password" onkeydown="if(event.key==='Enter')doLogin()">
+        <button class="login-btn" onclick="doLogin()">Masuk →</button>
+        <div class="login-error" id="loginError">❌ Username atau password salah</div>
+        <p style="font-size:12px;color:var(--muted);margin-top:16px;">Default: admin / heritage2026</p>
+    </div>
+</div>
+
+<!-- ===== ADMIN PANEL ===== -->
+<div class="admin-wrap" id="adminWrap">
+
+    <!-- Topbar -->
+    <div class="topbar">
+        <div class="topbar-left">
+            <h2>🍃 Heritage Nusantara</h2>
+            <p id="adminGreet">Admin Panel</p>
+        </div>
+        <div class="topbar-right">
+            <button class="topbar-btn" onclick="toggleAdminDark()">🌙</button>
+            <button class="topbar-btn" onclick="doLogout()">Keluar</button>
+        </div>
+    </div>
+
+    <!-- Stats -->
+    <div class="stats-grid" id="statsGrid">
+        <div class="stat-card accent">
+            <div class="icon">📋</div>
+            <div class="value" id="statTotalOrders">—</div>
+            <div class="label">Total Pesanan</div>
+        </div>
+        <div class="stat-card green">
+            <div class="icon">💰</div>
+            <div class="value" id="statTotalRevenue">—</div>
+            <div class="label">Total Pendapatan</div>
+        </div>
+        <div class="stat-card">
+            <div class="icon">🌅</div>
+            <div class="value" id="statTodayOrders">—</div>
+            <div class="label">Pesanan Hari Ini</div>
+        </div>
+        <div class="stat-card">
+            <div class="icon">📈</div>
+            <div class="value" id="statTodayRevenue">—</div>
+            <div class="label">Revenue Hari Ini</div>
+        </div>
+    </div>
+
+    <!-- Tab Nav -->
+    <div class="tab-nav">
+        <button class="tab-btn active" onclick="switchTab('orders',this)">
+            📋 Pesanan <span class="notif-dot" id="newOrderBadge" style="display:none">0</span>
+        </button>
+        <button class="tab-btn" onclick="switchTab('menu',this)">🍽 Kelola Menu</button>
+        <button class="tab-btn" onclick="switchTab('stats',this)">📊 Statistik</button>
+        <button class="tab-btn" onclick="switchTab('qr',this)">📲 QR Meja</button>
+        <button class="tab-btn" onclick="switchTab('setup',this)">⚙️ Setup</button>
+    </div>
+
+    <!-- ===== PANEL: ORDERS ===== -->
+    <div class="panel active" id="panel-orders">
+        <div class="refresh-row">
+            <div class="order-filters">
+                <button class="filter-btn active" onclick="filterOrders('semua',this)">Semua</button>
+                <button class="filter-btn" onclick="filterOrders('Baru',this)">🔴 Baru</button>
+                <button class="filter-btn" onclick="filterOrders('Diproses',this)">🟡 Diproses</button>
+                <button class="filter-btn" onclick="filterOrders('Diantar',this)">🛵 Diantar</button>
+                <button class="filter-btn" onclick="filterOrders('Selesai',this)">🟢 Selesai</button>
+                <button class="filter-btn" onclick="filterOrders('kasir',this)">💰 Kasir</button>
+                <button class="filter-btn" onclick="filterOrders('qris',this)">📱 QRIS</button>
+            </div>
+            <button class="refresh-btn" onclick="loadOrders()">🔄 Refresh</button>
+        </div>
+        <div id="orders-list"><div class="loading-spin"></div></div>
+        <div style="text-align:center;margin-top:8px;">
+            <span class="auto-refresh-label" id="lastRefreshTime"></span>
+        </div>
+    </div>
+
+    <!-- ===== PANEL: MENU ===== -->
+    <div class="panel" id="panel-menu">
+        <div class="menu-toolbar">
+            <h3>Daftar Menu (<span id="menuCount">0</span>)</h3>
+            <button class="add-menu-btn" onclick="openAddMenu()">+ Tambah Menu</button>
+        </div>
+        <div id="menu-list-admin"><div class="loading-spin"></div></div>
+    </div>
+
+    <!-- ===== PANEL: STATS ===== -->
+    <div class="panel" id="panel-stats">
+        <div class="stat-card" style="margin-bottom:14px;">
+            <div class="icon">🏆</div>
+            <strong style="display:block;margin-bottom:12px;color:var(--text);">Menu Terlaris</strong>
+            <div id="topItemsList"><div style="color:var(--muted);font-size:14px;">Memuat data...</div></div>
+        </div>
+        <div class="stat-card">
+            <div class="icon">📅</div>
+            <strong style="display:block;margin-bottom:12px;color:var(--text);">Ringkasan</strong>
+            <div id="statsSummary" style="font-size:14px;color:var(--muted);">Memuat...</div>
+        </div>
+    </div>
+
+    <!-- ===== PANEL: QR MEJA ===== -->
+    <div class="panel" id="panel-qr">
+        <div class="stat-card">
+            <h3 style="margin-bottom:16px;color:var(--text);">📲 Buat QR Code Meja</h3>
+            <p style="font-size:14px;color:var(--muted);margin-bottom:16px;">QR code berisi link menu yang sudah menyertakan nomor meja. Customer cukup scan → langsung pesan tanpa input apapun.</p>
+            <div class="form-group">
+                <label>Nomor Meja</label>
+                <input type="text" id="qrTableInput" placeholder="Contoh: 1, 2, VIP-1..." maxlength="20">
+            </div>
+            <button class="add-menu-btn" onclick="generateQrCode()">🎯 Buat QR Code</button>
+            <div id="qrResult" style="margin-top:20px;"></div>
+        </div>
+    </div>
+
+    <!-- ===== PANEL: SETUP ===== -->
+    <div class="panel" id="panel-setup">
+        <div class="stat-card" style="margin-bottom:14px;">
+            <h3 style="margin-bottom:16px;color:var(--text);">⚙️ Konfigurasi Apps Script</h3>
+            <div class="form-group">
+                <label>URL Google Apps Script</label>
+                <input type="text" id="setupUrl" placeholder="https://script.google.com/macros/s/...">
+            </div>
+            <button class="add-menu-btn" onclick="saveSetup()">💾 Simpan URL</button>
+            <div id="setupStatus" style="margin-top:10px;font-size:13px;"></div>
+        </div>
+        <div class="stat-card">
+            <h3 style="margin-bottom:16px;color:var(--text);">🔐 Ganti Password</h3>
+            <div class="form-group">
+                <label>Password Baru</label>
+                <input type="password" id="newPass" placeholder="Password baru">
+            </div>
+            <div class="form-group">
+                <label>Konfirmasi Password</label>
+                <input type="password" id="confirmPass" placeholder="Ulangi password">
+            </div>
+            <button class="add-menu-btn" onclick="changePassword()">🔐 Ganti Password</button>
+            <div id="passStatus" style="margin-top:10px;font-size:13px;"></div>
+        </div>
+    </div>
+
+</div><!-- end admin-wrap -->
+
+<!-- ===== MODAL FORM MENU ===== -->
+<div class="modal-overlay" id="menuModal">
+    <div class="modal-box">
+        <h3 id="menuModalTitle">➕ Tambah Menu</h3>
+        <div class="form-row">
+            <div class="form-group">
+                <label>Nama Menu</label>
+                <input type="text"   id="fName"  placeholder="Nama hidangan">
+            </div>
+            <div class="form-group">
+                <label>Harga (Rp)</label>
+                <input type="number" id="fPrice" placeholder="50000">
+            </div>
+        </div>
+        <div class="form-row">
+            <div class="form-group">
+                <label>Kategori</label>
+                <select id="fCategory">
+                    <option value="makanan">🍛 Makanan</option>
+                    <option value="minuman">🥤 Minuman</option>
+                    <option value="dessert">🍨 Dessert</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Sub-kategori</label>
+                <input type="text" id="fSubcat" placeholder="Appetizer / Soup / dll">
+            </div>
+        </div>
+        <div class="form-group">
+            <label>Deskripsi</label>
+            <textarea id="fDesc" placeholder="Deskripsi menu..."></textarea>
+        </div>
+        <div class="form-group">
+            <label>Path Gambar</label>
+            <input type="text" id="fImage" placeholder="images/nama-file.jpeg">
+        </div>
+        <label class="form-check">
+            <input type="checkbox" id="fBestSeller"> Best Seller 🔥
+        </label>
+        <div class="modal-btns">
+            <button class="modal-cancel" onclick="closeMenuModal()">Batal</button>
+            <button class="modal-save"   onclick="saveMenuItem()">Simpan</button>
+        </div>
+    </div>
+</div>
+
+<!-- ===== MODAL QR (inline panel sudah cukup, tapi backup modal) ===== -->
+<div class="modal-overlay" id="qrModal" style="display:none;">
+    <div class="modal-box">
+        <h3>📲 QR Code Meja</h3>
+        <div class="form-group">
+            <label>Nomor Meja</label>
+            <input type="text" id="qrTableInput2" placeholder="Contoh: 5" maxlength="20">
+        </div>
+        <div id="qrResult2" style="margin-top:16px;"></div>
+        <div class="modal-btns">
+            <button class="modal-cancel" onclick="closeQrModal()">Tutup</button>
+            <button class="modal-save"   onclick="generateQrCode()">Buat QR</button>
+        </div>
+    </div>
+</div>
+
+<script src="assets/js/shared/config.js"></script>
+<script src="assets/js/shared/default-menu.js"></script>
+<script src="assets/js/shared/utils.js"></script>
+<script src="assets/js/shared/api.js"></script>
+<script src="assets/js/admin/state.js"></script>
+<script src="assets/js/admin/auth.js"></script>
+<script src="assets/js/admin/orders.js"></script>
+<script src="assets/js/admin/menu-manager.js"></script>
+<script src="assets/js/admin/stats.js"></script>
+<script src="assets/js/admin/init.js"></script>
+</body>
+</html>
