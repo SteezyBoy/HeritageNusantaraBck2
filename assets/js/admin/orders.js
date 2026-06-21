@@ -7,6 +7,7 @@
 //   Diantar  → Sudah Bayar, Hapus
 //   Selesai  → (tidak ada tombol aksi)
 // "Sudah Bayar" → status Selesai + payment Lunas
+// Payment method badge preserved (QRIS/Kasir) even after Lunas
 // ================================================================
 
 // ── BEEP NOTIFIKASI ──────────────────────────────────────────────
@@ -50,12 +51,21 @@ async function loadOrders(silent = false) {
         if (hasNew && lastOrderIds.size > 0) playNewOrderBeep();
         lastOrderIds = newIds;
 
-        // Tambahkan _paymentMethod untuk badge (preserve method after Lunas)
+        // ── SIMPAN METODE PEMBAYARAN SECARA PERMANEN ──
         newOrders.forEach(o => {
-            const ps = (o.paymentStatus || "").toLowerCase();
-            if (ps.includes("kasir")) o._paymentMethod = "kasir";
-            else if (ps.includes("qris")) o._paymentMethod = "qris";
-            else if (o._paymentMethod) { /* keep existing */ }
+            // Jika API mengirim field paymentMethod, gunakan itu
+            if (o.paymentMethod) {
+                o._paymentMethod = o.paymentMethod.toLowerCase();
+            } else {
+                // Ekstrak dari paymentStatus jika masih ada indikasi
+                const ps = (o.paymentStatus || "").toLowerCase();
+                if (ps.includes("qris")) o._paymentMethod = "qris";
+                else if (ps.includes("kasir")) o._paymentMethod = "kasir";
+                // Jika sudah lunas dan tidak ada metode, coba cari dari data lama (tidak ada)
+                // Kita biarkan kosong, nanti akan tampil "Lunas" saja
+            }
+            // Pastikan properti ada
+            if (!o._paymentMethod) o._paymentMethod = null;
         });
 
         currentOrders = newOrders;
@@ -91,11 +101,13 @@ function renderOrders() {
         ? currentOrders
         : currentOrders.filter(o => normalizeOrderStatus(o.status) === currentFilter);
 
-    // Filter tambahan: bayar dikasir / qris
-    if (currentFilter === "kasir")
-        filtered = currentOrders.filter(o => (o.paymentStatus || "").includes("Kasir"));
-    if (currentFilter === "qris")
-        filtered = currentOrders.filter(o => (o.paymentStatus || "").includes("QRIS") || (o.paymentStatus || "").includes("Qris"));
+    // Filter tambahan: bayar dikasir / qris (gunakan _paymentMethod)
+    if (currentFilter === "kasir") {
+        filtered = currentOrders.filter(o => o._paymentMethod === "kasir");
+    }
+    if (currentFilter === "qris") {
+        filtered = currentOrders.filter(o => o._paymentMethod === "qris");
+    }
 
     if (filtered.length === 0) {
         list.innerHTML = '<div class="empty-msg"><div class="em-icon">📋</div><p>Tidak ada pesanan</p></div>';
@@ -134,22 +146,25 @@ function buildOrderCardHtml(order) {
     const statusClass  = statusText.toLowerCase().replace(/ /g, "");
     const badgeClass   = "badge-" + statusClass;
     const ps           = order.paymentStatus || "-";
+    const isPaid       = ps === "Lunas";
 
-    // ── Payment Badge (selalu tampilkan metode, dengan ceklis jika lunas) ──
+    // ── Payment Badge (gunakan _paymentMethod yang sudah disimpan) ──
     let paymentBadge = "";
-    const method = order._paymentMethod || "";
-    const isPaid = ps === "Lunas";
+    const method = order._paymentMethod;
 
-    if (method === "qris" || ps.includes("QRIS") || ps.includes("Qris")) {
+    if (method === "qris") {
         paymentBadge = isPaid
             ? '<span class="order-badge badge-qris">✅ QRIS</span>'
             : '<span class="order-badge badge-qris">📱 QRIS</span>';
-    } else if (method === "kasir" || ps.includes("Kasir")) {
+    } else if (method === "kasir") {
         paymentBadge = isPaid
             ? '<span class="order-badge badge-kasir">✅ Kasir</span>'
             : '<span class="order-badge badge-kasir">💰 Bayar di Kasir</span>';
-    } else if (isPaid) {
-        paymentBadge = '<span class="order-badge badge-selesai">✅ Lunas</span>';
+    } else {
+        // Jika metode tidak diketahui, tampilkan status lunas saja
+        paymentBadge = isPaid
+            ? '<span class="order-badge badge-selesai">✅ Lunas</span>'
+            : ''; // jika belum lunas dan tidak ada metode, tidak tampilkan badge
     }
 
     // ── Items ─────────────────────────────────────────────────────
@@ -164,20 +179,17 @@ function buildOrderCardHtml(order) {
     let actionButtons = "";
 
     if (statusText === "Baru") {
-        // Baru → hanya Diproses + Hapus
         actionButtons = `
             <button class="action-btn btn-proses" onclick="updateStatus('${safeId}','Diproses')">🍳 Diproses</button>
             <button class="action-btn btn-hapus"  onclick="deleteOrder('${safeId}')">🗑 Hapus</button>
         `;
     } else if (statusText === "Diproses") {
-        // Diproses → hanya Diantar + Hapus
         actionButtons = `
             <button class="action-btn btn-diantar" onclick="updateStatus('${safeId}','Diantar')">🛵 Sudah Diantar</button>
             <button class="action-btn btn-hapus"    onclick="deleteOrder('${safeId}')">🗑 Hapus</button>
         `;
     } else if (statusText === "Diantar") {
-        // Diantar → Sudah Bayar (jika belum lunas) + Hapus
-        const bayarBtn = ps !== "Lunas"
+        const bayarBtn = !isPaid
             ? `<button class="action-btn btn-selesai" onclick="markOrderPaid('${safeId}')">💵 Sudah Bayar</button>`
             : `<span style="font-size:12px;color:var(--green);font-weight:600;">✅ Sudah Dibayar</span>`;
         actionButtons = `
@@ -185,7 +197,6 @@ function buildOrderCardHtml(order) {
             <button class="action-btn btn-hapus" onclick="deleteOrder('${safeId}')">🗑 Hapus</button>
         `;
     } else {
-        // Selesai → tidak ada tombol aksi
         actionButtons = `<span style="font-size:12px;color:var(--muted);">✅ Pesanan selesai</span>`;
     }
 
@@ -248,10 +259,14 @@ async function markOrderPaid(orderId) {
         const order = currentOrders.find(x => x.id === orderId);
         if (!order) { alert("Order tidak ditemukan"); return; }
 
-        // Tentukan metode pembayaran dari paymentStatus
-        const ps = order.paymentStatus || "";
-        let method = "kasir";
-        if (ps.includes("QRIS") || ps.includes("Qris")) method = "qris";
+        // Tentukan metode pembayaran dari _paymentMethod atau paymentStatus
+        let method = order._paymentMethod;
+        if (!method) {
+            const ps = (order.paymentStatus || "").toLowerCase();
+            if (ps.includes("qris")) method = "qris";
+            else if (ps.includes("kasir")) method = "kasir";
+            else method = "kasir"; // default
+        }
 
         // 1. Update status ke Selesai
         const statusResult = await updateOrderStatus(orderId, "Selesai");
