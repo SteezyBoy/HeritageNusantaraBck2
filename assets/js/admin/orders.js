@@ -1,6 +1,12 @@
 // ================================================================
 // HERITAGE NUSANTARA - Admin Orders
 // Auto-refresh 15 detik, notif suara, group per meja
+// Status-driven action buttons:
+//   Baru     → Diproses, Hapus
+//   Diproses → Diantar, Hapus
+//   Diantar  → Sudah Bayar, Hapus
+//   Selesai  → (tidak ada tombol aksi)
+// "Sudah Bayar" → status Selesai + payment Lunas
 // ================================================================
 
 // ── BEEP NOTIFIKASI ──────────────────────────────────────────────
@@ -43,6 +49,14 @@ async function loadOrders(silent = false) {
         newIds.forEach(id => { if (!lastOrderIds.has(id)) hasNew = true; });
         if (hasNew && lastOrderIds.size > 0) playNewOrderBeep();
         lastOrderIds = newIds;
+
+        // Tambahkan _paymentMethod untuk badge (preserve method after Lunas)
+        newOrders.forEach(o => {
+            const ps = (o.paymentStatus || "").toLowerCase();
+            if (ps.includes("kasir")) o._paymentMethod = "kasir";
+            else if (ps.includes("qris")) o._paymentMethod = "qris";
+            else if (o._paymentMethod) { /* keep existing */ }
+        });
 
         currentOrders = newOrders;
 
@@ -98,7 +112,6 @@ function renderOrders() {
 
     let html = "";
     Object.entries(tableGroups).forEach(([table, orders]) => {
-        // Cek apakah ada yang belum lunas di meja ini
         const hasUnpaid = orders.some(o => o.paymentStatus !== "Lunas");
         html += `<div class="table-group">
             <div class="table-group-header">
@@ -114,7 +127,7 @@ function renderOrders() {
     list.innerHTML = html;
 }
 
-// ── BUILD SINGLE ORDER CARD ──────────────────────────────────────
+// ── BUILD SINGLE ORDER CARD (Status-driven buttons) ─────────────
 function buildOrderCardHtml(order) {
     const safeId       = escapeJsString(order.id);
     const statusText   = normalizeOrderStatus(order.status);
@@ -122,16 +135,24 @@ function buildOrderCardHtml(order) {
     const badgeClass   = "badge-" + statusClass;
     const ps           = order.paymentStatus || "-";
 
-    // Badge pembayaran
+    // ── Payment Badge (selalu tampilkan metode, dengan ceklis jika lunas) ──
     let paymentBadge = "";
-    if (ps === "Menunggu Kasir")
-        paymentBadge = '<span class="order-badge badge-kasir">💰 Bayar di Kasir</span>';
-    else if (ps === "Menunggu QRIS" || ps === "Menunggu Qris")
-        paymentBadge = '<span class="order-badge badge-qris">📱 QRIS</span>';
-    else if (ps === "Lunas")
-        paymentBadge = '<span class="order-badge badge-selesai">✅ Lunas</span>';
+    const method = order._paymentMethod || "";
+    const isPaid = ps === "Lunas";
 
-    // Tampilkan items — catatan terpisah jika notes berbeda
+    if (method === "qris" || ps.includes("QRIS") || ps.includes("Qris")) {
+        paymentBadge = isPaid
+            ? '<span class="order-badge badge-qris">✅ QRIS</span>'
+            : '<span class="order-badge badge-qris">📱 QRIS</span>';
+    } else if (method === "kasir" || ps.includes("Kasir")) {
+        paymentBadge = isPaid
+            ? '<span class="order-badge badge-kasir">✅ Kasir</span>'
+            : '<span class="order-badge badge-kasir">💰 Bayar di Kasir</span>';
+    } else if (isPaid) {
+        paymentBadge = '<span class="order-badge badge-selesai">✅ Lunas</span>';
+    }
+
+    // ── Items ─────────────────────────────────────────────────────
     const itemsHtml = (order.items || []).map(it => `
         <div class="order-item-row">
             <span>${it.qty}× ${it.name} ${it.notes && it.notes !== "-" ? `<em class="note">(${it.notes})</em>` : ""}</span>
@@ -139,12 +160,36 @@ function buildOrderCardHtml(order) {
             <span class="item-status-small ${getItemStatusClass(it.status)}">${getItemStatusLabel(it.status)}</span>
         </div>`).join("");
 
-    // Tombol aksi
-    const paidBtn   = ps === "Menunggu Kasir"
-        ? `<button class="action-btn btn-selesai" onclick="markOrderPaid('${safeId}')">💵 Sudah Bayar</button>` : "";
-    const diantarBtn = statusText !== "Diantar" && statusText !== "Selesai"
-        ? `<button class="action-btn btn-diantar" onclick="updateStatus('${safeId}','Diantar')">🛵 Sudah Diantar</button>` : "";
+    // ── Action Buttons (status-driven) ──────────────────────────
+    let actionButtons = "";
 
+    if (statusText === "Baru") {
+        // Baru → hanya Diproses + Hapus
+        actionButtons = `
+            <button class="action-btn btn-proses" onclick="updateStatus('${safeId}','Diproses')">🍳 Diproses</button>
+            <button class="action-btn btn-hapus"  onclick="deleteOrder('${safeId}')">🗑 Hapus</button>
+        `;
+    } else if (statusText === "Diproses") {
+        // Diproses → hanya Diantar + Hapus
+        actionButtons = `
+            <button class="action-btn btn-diantar" onclick="updateStatus('${safeId}','Diantar')">🛵 Sudah Diantar</button>
+            <button class="action-btn btn-hapus"    onclick="deleteOrder('${safeId}')">🗑 Hapus</button>
+        `;
+    } else if (statusText === "Diantar") {
+        // Diantar → Sudah Bayar (jika belum lunas) + Hapus
+        const bayarBtn = ps !== "Lunas"
+            ? `<button class="action-btn btn-selesai" onclick="markOrderPaid('${safeId}')">💵 Sudah Bayar</button>`
+            : `<span style="font-size:12px;color:var(--green);font-weight:600;">✅ Sudah Dibayar</span>`;
+        actionButtons = `
+            ${bayarBtn}
+            <button class="action-btn btn-hapus" onclick="deleteOrder('${safeId}')">🗑 Hapus</button>
+        `;
+    } else {
+        // Selesai → tidak ada tombol aksi
+        actionButtons = `<span style="font-size:12px;color:var(--muted);">✅ Pesanan selesai</span>`;
+    }
+
+    // ── Card HTML ─────────────────────────────────────────────────
     return `
     <div class="order-card status-${statusClass}">
         <div class="order-header">
@@ -162,11 +207,7 @@ function buildOrderCardHtml(order) {
             <div class="order-total-row"><span>Total</span><span>${fmt(order.total)}</span></div>
         </div>
         <div class="order-actions">
-            <button class="action-btn btn-proses"  onclick="updateStatus('${safeId}','Diproses')">🍳 Diproses</button>
-            ${diantarBtn}
-            <button class="action-btn btn-selesai" onclick="updateStatus('${safeId}','Selesai')">✅ Selesai</button>
-            ${paidBtn}
-            <button class="action-btn btn-hapus"   onclick="deleteOrder('${safeId}')">🗑 Hapus</button>
+            ${actionButtons}
         </div>
     </div>`;
 }
@@ -190,27 +231,52 @@ function getItemStatusClass(s) {
 async function updateStatus(orderId, newStatus) {
     if (!getAdminScriptUrl()) { alert("Set URL Apps Script dulu di tab Setup!"); return; }
     try {
-        await updateOrderStatus(orderId, newStatus);
+        const result = await updateOrderStatus(orderId, newStatus);
+        if (result.status !== "ok") { alert("Gagal update status: " + (result.message || "")); return; }
         const o = currentOrders.find(x => x.id === orderId);
         if (o) o.status = newStatus;
         renderOrders();
         loadStats();
+        showAdminToast("✅ Status diperbarui: " + newStatus);
     } catch (e) { alert("Gagal update status: " + e.message); }
 }
 
 async function markOrderPaid(orderId) {
     if (!getAdminScriptUrl()) { alert("URL Apps Script belum diset!"); return; }
-    if (!confirm(`Tandai pesanan ${orderId} sudah dibayar di kasir?`)) return;
+    if (!confirm(`Konfirmasi pembayaran untuk pesanan ${orderId}?`)) return;
     try {
-        const result = await markPaymentPaid(orderId);
-        if (result.status === "ok") {
-            const o = currentOrders.find(x => x.id === orderId);
-            if (o) o.paymentStatus = "Lunas";
-            renderOrders();
-            showAdminToast("✅ Pembayaran dikonfirmasi!");
-        } else {
-            alert("❌ Gagal: " + (result.message || "Unknown error"));
+        const order = currentOrders.find(x => x.id === orderId);
+        if (!order) { alert("Order tidak ditemukan"); return; }
+
+        // Tentukan metode pembayaran dari paymentStatus
+        const ps = order.paymentStatus || "";
+        let method = "kasir";
+        if (ps.includes("QRIS") || ps.includes("Qris")) method = "qris";
+
+        // 1. Update status ke Selesai
+        const statusResult = await updateOrderStatus(orderId, "Selesai");
+        if (statusResult.status !== "ok") {
+            alert("Gagal update status: " + (statusResult.message || ""));
+            return;
         }
+
+        // 2. Tandai payment sebagai Lunas
+        const paymentResult = await markPaymentPaid(orderId);
+        if (paymentResult.status !== "ok") {
+            alert("Gagal konfirmasi pembayaran: " + (paymentResult.message || ""));
+            return;
+        }
+
+        // 3. Update local state
+        const o = currentOrders.find(x => x.id === orderId);
+        if (o) {
+            o.status = "Selesai";
+            o.paymentStatus = "Lunas";
+            o._paymentMethod = method; // simpan metode untuk badge
+        }
+        renderOrders();
+        loadStats();
+        showAdminToast("✅ Pembayaran dikonfirmasi! Pesanan selesai.");
     } catch (e) { alert("❌ Error: " + e.message); }
 }
 
@@ -263,7 +329,6 @@ function generateQrCode() {
         <p style="font-size:12px;color:var(--muted);text-align:center;">Scan QR ini untuk Meja ${table}</p>
         <button class="add-menu-btn" style="width:100%;margin-top:10px;" onclick="printQrCode('${escapeJsString(table)}','${escapeJsString(qrUrl)}')">🖨️ Print QR Code</button>`;
 
-    // Render QR via Google Charts API (no JS lib needed)
     const img = document.createElement("img");
     img.src   = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(qrUrl)}`;
     img.alt   = `QR Meja ${table}`;
