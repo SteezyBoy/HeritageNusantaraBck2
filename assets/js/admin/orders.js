@@ -8,6 +8,7 @@
 //   Selesai  → (tidak ada tombol aksi)
 // "Sudah Bayar" → status Selesai + payment Lunas
 // Payment method badge preserved (QRIS/Kasir) even after Lunas
+// Metode pembayaran disimpan di localStorage agar persisten
 // ================================================================
 
 // ── BEEP NOTIFIKASI ──────────────────────────────────────────────
@@ -26,6 +27,22 @@ function playNewOrderBeep() {
             osc.stop(ctx.currentTime + delay + 0.3);
         });
     } catch(e) {}
+}
+
+// ── LOCAL STORAGE HELPERS UNTUK METODE PEMBAYARAN ──────────────
+function getStoredPaymentMethod(orderId) {
+    try {
+        const data = JSON.parse(localStorage.getItem('hn_payment_methods') || '{}');
+        return data[orderId] || null;
+    } catch { return null; }
+}
+
+function setStoredPaymentMethod(orderId, method) {
+    try {
+        const data = JSON.parse(localStorage.getItem('hn_payment_methods') || '{}');
+        data[orderId] = method;
+        localStorage.setItem('hn_payment_methods', JSON.stringify(data));
+    } catch {}
 }
 
 // ── LOAD & RENDER ────────────────────────────────────────────────
@@ -51,21 +68,28 @@ async function loadOrders(silent = false) {
         if (hasNew && lastOrderIds.size > 0) playNewOrderBeep();
         lastOrderIds = newIds;
 
-        // ── SIMPAN METODE PEMBAYARAN SECARA PERMANEN ──
+        // ── TENTUKAN METODE PEMBAYARAN ──
         newOrders.forEach(o => {
-            // Jika API mengirim field paymentMethod, gunakan itu
+            // 1. Coba dari field paymentMethod jika ada
             if (o.paymentMethod) {
                 o._paymentMethod = o.paymentMethod.toLowerCase();
-            } else {
-                // Ekstrak dari paymentStatus jika masih ada indikasi
+            } 
+            // 2. Coba dari paymentStatus (saat masih menunggu)
+            else {
                 const ps = (o.paymentStatus || "").toLowerCase();
                 if (ps.includes("qris")) o._paymentMethod = "qris";
                 else if (ps.includes("kasir")) o._paymentMethod = "kasir";
-                // Jika sudah lunas dan tidak ada metode, coba cari dari data lama (tidak ada)
-                // Kita biarkan kosong, nanti akan tampil "Lunas" saja
+                else {
+                    // 3. Jika tidak ada, coba dari localStorage
+                    const stored = getStoredPaymentMethod(o.id);
+                    if (stored) o._paymentMethod = stored;
+                    else o._paymentMethod = null;
+                }
             }
-            // Pastikan properti ada
-            if (!o._paymentMethod) o._paymentMethod = null;
+            // Jika berhasil dapat metode, simpan ke localStorage untuk referensi future
+            if (o._paymentMethod) {
+                setStoredPaymentMethod(o.id, o._paymentMethod);
+            }
         });
 
         currentOrders = newOrders;
@@ -161,7 +185,7 @@ function buildOrderCardHtml(order) {
             ? '<span class="order-badge badge-kasir">✅ Kasir</span>'
             : '<span class="order-badge badge-kasir">💰 Bayar di Kasir</span>';
     } else {
-        // Jika metode tidak diketahui, tampilkan status lunas saja
+        // Jika metode tidak diketahui, tampilkan status lunas saja (fallback)
         paymentBadge = isPaid
             ? '<span class="order-badge badge-selesai">✅ Lunas</span>'
             : ''; // jika belum lunas dan tidak ada metode, tidak tampilkan badge
@@ -282,12 +306,13 @@ async function markOrderPaid(orderId) {
             return;
         }
 
-        // 3. Update local state
+        // 3. Update local state dan simpan metode ke localStorage
         const o = currentOrders.find(x => x.id === orderId);
         if (o) {
             o.status = "Selesai";
             o.paymentStatus = "Lunas";
-            o._paymentMethod = method; // simpan metode untuk badge
+            o._paymentMethod = method;
+            setStoredPaymentMethod(orderId, method); // simpan permanen
         }
         renderOrders();
         loadStats();
@@ -302,6 +327,12 @@ async function deleteOrder(orderId) {
         const result = await deleteOrderFromApi(orderId);
         if (result.status === "ok") {
             currentOrders = currentOrders.filter(o => o.id !== orderId);
+            // Hapus dari localStorage juga
+            try {
+                const data = JSON.parse(localStorage.getItem('hn_payment_methods') || '{}');
+                delete data[orderId];
+                localStorage.setItem('hn_payment_methods', JSON.stringify(data));
+            } catch {}
             renderOrders();
             loadStats();
             showAdminToast("✅ Pesanan dihapus.");
