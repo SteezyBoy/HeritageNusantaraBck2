@@ -5,10 +5,9 @@
 //   Baru     → Diproses, Hapus
 //   Diproses → Diantar, Hapus
 //   Diantar  → Sudah Bayar, Hapus
-//   Selesai  → (tidak ada tombol aksi)
-// "Sudah Bayar" → status Selesai + payment Lunas
-// Payment method badge preserved (QRIS/Kasir) even after Lunas
-// Metode pembayaran disimpan di localStorage agar persisten
+//   Selesai  → Hapus (saja)
+// Badge metode pembayaran (QRIS/Kasir) selalu muncul,
+// tidak ada duplikasi "Lunas" di samping status.
 // ================================================================
 
 // ── BEEP NOTIFIKASI ──────────────────────────────────────────────
@@ -221,7 +220,10 @@ function buildOrderCardHtml(order) {
             <button class="action-btn btn-hapus" onclick="deleteOrder('${safeId}')">🗑 Hapus</button>
         `;
     } else {
-        actionButtons = `<span style="font-size:12px;color:var(--muted);">✅ Pesanan selesai</span>`;
+        // Selesai → hanya tombol Hapus
+        actionButtons = `
+            <button class="action-btn btn-hapus" onclick="deleteOrder('${safeId}')">🗑 Hapus</button>
+        `;
     }
 
     // ── Card HTML ─────────────────────────────────────────────────
